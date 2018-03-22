@@ -6,7 +6,7 @@ namespace DataTable;
 use PDO;
 use PDOException;
 
-class SSP 
+class SSP
 {
 
     /**
@@ -44,6 +44,27 @@ class SSP
         return $out;
     }
 
+    /**
+     * Database connection
+     *
+     * Obtain an PHP PDO connection from a connection details array
+     *
+     * @param  array $conn SQL connection details. The array should have
+     *                     the following properties
+     *                     * host - host name
+     *                     * db   - database name
+     *                     * user - user name
+     *                     * pass - user password
+     *
+     * @return resource PDO connection
+     */
+    static function db($conn)
+    {
+        if (is_array($conn)) {
+            return self::sql_connect($conn);
+        }
+        return $conn;
+    }
 
     /**
      * Paging
@@ -190,7 +211,7 @@ class SSP
      * sending back to the client.
      *
      *  @param  array $request Data sent to server by DataTables
-     *  @param  array $sql_details SQL connection details - see sql_connect()
+     *  @param  array|PDO $conn PDO connection resource or connection parameters array
      *  @param  string $table SQL table to query
      *  @param  string $primaryKey Primary key of the table
      *  @param  array $columns Column information array
@@ -202,10 +223,10 @@ class SSP
      *  @return array  Server-side processing response array
      *
      */
-    static function simple ( $request, $sql_details, $table, $primaryKey, $columns, $joinQuery = NULL, $extraWhere = '', $groupBy = '', $having = '')
+    static function simple ( $request, $conn, $table, $primaryKey, $columns, $joinQuery = NULL, $extraWhere = '', $groupBy = '', $having = '')
     {
         $bindings = array();
-        $db = SSP::sql_connect( $sql_details );
+        $db       = self::db($conn);
 
         // Build the SQL query string from the request
         $limit = SSP::limit( $request, $columns );

@@ -31,10 +31,13 @@ class SSP
 
                 // Is there a formatter?
                 if ( isset( $column['formatter'] ) ) {
-                    $row[ $column['dt'] ] = ($isJoin) ? $column['formatter']( $data[$i][ $column['field'] ], $data[$i] ) : $column['formatter']( $data[$i][ $column['db'] ], $data[$i] );
+                    $row[ $column['dt'] ] = ($isJoin) ? $column['formatter']( $data[$i][ $column['field'] ] ?? null, $data[$i] ) : $column['formatter']( $data[$i][ $column['db'] ] ?? null, $data[$i] );
                 }
                 else {
-                    $row[ $column['dt'] ] = ($isJoin) ? $data[$i][ $columns[$j]['field'] ] : $data[$i][ $columns[$j]['db'] ];
+                    if (strpos($column['db'],'@') === 0)
+                        $row[ $column['dt'] ] = str_replace(':id', $data[$i]['id'], $column['value']);
+                    else
+                        $row[ $column['dt'] ] = ($isJoin) ? $data[$i][ $columns[$j]['field'] ] : $data[$i][ $columns[$j]['db'] ];
                 }
             }
 
@@ -80,7 +83,7 @@ class SSP
         $limit = '';
 
         if ( isset($request['start']) && $request['length'] != -1 ) {
-            $limit = "LIMIT ".intval($request['start']).", ".intval($request['length']);
+            $limit = "OFFSET ".intval($request['start'])." LIMIT ".intval($request['length']);
         }
 
         return $limit;
@@ -115,11 +118,13 @@ class SSP
                 $column = $columns[ $columnIdx ];
 
                 if ( $requestColumn['orderable'] == 'true' ) {
+                    if (strpos($column['db'], '@') === 0)
+                        continue;
                     $dir = $request['order'][$i]['dir'] === 'asc' ?
                         'ASC' :
                         'DESC';
 
-                    $orderBy[] = ($isJoin) ? $column['db'].' '.$dir : '`'.$column['db'].'` '.$dir;
+                    $orderBy[] = ($isJoin) ? $column['db'].' '.$dir : '"'.$column['db'].'" '.$dir;
                 }
             }
 
@@ -151,6 +156,7 @@ class SSP
         $globalSearch = array();
         $columnSearch = array();
         $dtColumns = SSP::pluck( $columns, 'dt' );
+        $dbColumns = SSP::pluck( $columns, 'db' );
 
         if ( isset($request['search']) && $request['search']['value'] != '' ) {
             $str = $request['search']['value'];
@@ -159,10 +165,12 @@ class SSP
                 $requestColumn = $request['columns'][$i];
                 $columnIdx = array_search( $requestColumn['data'], $dtColumns );
                 $column = $columns[ $columnIdx ];
+                if ($dbColumns[ $columnIdx ] === null)
+                    continue;
 
                 if ( $requestColumn['searchable'] == 'true' ) {
                     $binding = SSP::bind( $bindings, '%'.$str.'%', PDO::PARAM_STR );
-                    $globalSearch[] = ($isJoin) ? $column['db']." LIKE ".$binding : "`".$column['db']."` LIKE ".$binding;
+                    $globalSearch[] = ($isJoin) ? "to_char(\"".$column['db']."\"::text ILIKE ".$binding : "to_char(\"".$column['db']."\")::text ILIKE ".$binding;
                 }
             }
         }
@@ -173,12 +181,14 @@ class SSP
             $columnIdx = array_search( $requestColumn['data'], $dtColumns );
             $column = $columns[ $columnIdx ];
 
+            if ($dbColumns[ $columnIdx ] === null)
+                continue;
+
             $str = $requestColumn['search']['value'];
 
-            if ( $requestColumn['searchable'] == 'true' &&
-                $str != '' ) {
+            if ( $requestColumn['searchable'] == 'true') {
                 $binding = SSP::bind( $bindings, '%'.$str.'%', PDO::PARAM_STR );
-                $columnSearch[] = ($isJoin) ? $column['db']." LIKE ".$binding : "`".$column['db']."` LIKE ".$binding;
+                $columnSearch[] = ($isJoin) ? "to_char(\"".$column['db']."\"::text ILIKE ".$binding : "to_char(\"".$column['db']."\")::text ILIKE ".$binding;
             }
         }
 
@@ -228,6 +238,23 @@ class SSP
         $bindings = array();
         $db       = self::db($conn);
 
+        // Date format
+        $db->query("CREATE OR REPLACE FUNCTION to_char(timestamptz) RETURNS text AS
+        $$
+             SELECT to_char($1,'Month DD, YYYY HH12:Mi:SSam');
+        $$
+        LANGUAGE SQL;");
+        $db->query("CREATE OR REPLACE FUNCTION to_char(text) RETURNS text AS
+        $$
+             SELECT $1::text;
+        $$
+        LANGUAGE SQL;");
+        $db->query("CREATE OR REPLACE FUNCTION to_char(date) RETURNS text AS
+        $$
+             SELECT to_char($1,'Month DD, YYYY');
+        $$
+        LANGUAGE SQL;");
+
         // Build the SQL query string from the request
         $limit = SSP::limit( $request, $columns );
         $order = SSP::order( $request, $columns, $joinQuery );
@@ -244,39 +271,43 @@ class SSP
         // Main query to actually get the data
         if($joinQuery){
             $col = SSP::pluck($columns, 'db', $joinQuery);
-            $query =  "SELECT SQL_CALC_FOUND_ROWS ".implode(", ", $col)."
+            $query =  "SELECT ".implode(", ", $col)."
 			 $joinQuery
 			 $where
 			 $extraWhere
 			 $groupBy
-       $having
+             $having
 			 $order
 			 $limit";
         }else{
-            $query =  "SELECT SQL_CALC_FOUND_ROWS `".implode("`, `", SSP::pluck($columns, 'db'))."`
-			 FROM `$table`
-			 $where
-			 $extraWhere
-			 $groupBy
-       $having
-			 $order
-			 $limit";
+            $unquoted_columns = SSP::pluck($columns, 'db');
+            $tmp_columns = [];
+            foreach($unquoted_columns as $column)
+            {
+                if ($column === null)
+                    continue;
+                else
+                    $tmp_columns[] = '"'.$column.'"';
+            }
+            $query =  "SELECT ".implode(", ", $tmp_columns)."
+			 FROM \"$table\" $where $extraWhere $groupBy $having $order $limit";
         }
 
         $data = SSP::sql_exec( $db, $bindings,$query);
 
         // Data set length after filtering
         $resFilterLength = SSP::sql_exec( $db,
-            "SELECT FOUND_ROWS()"
+            "SELECT COUNT(*)
+            FROM \"$table\""
         );
-        $recordsFiltered = $resFilterLength[0][0];
+        $recordsFiltered = $resFilterLength[0][0] ?? 0;
 
         // Total data set length
         $resTotalLength = SSP::sql_exec( $db,
-            "SELECT COUNT(`{$primaryKey}`)
-			 FROM   `$table`"
+            "SELECT COUNT(\"{$primaryKey}\")
+			 FROM   \"$table\""
         );
-        $recordsTotal = $resTotalLength[0][0];
+        $recordsTotal = $resTotalLength[0][0] ?? 0;
 
 
         /*
@@ -306,7 +337,7 @@ class SSP
     {
         try {
             $db = @new PDO(
-                "mysql:host={$sql_details['host']};dbname={$sql_details['db']}",
+                "pgsql:host={$sql_details['host']};dbname={$sql_details['db']}",
                 $sql_details['user'],
                 $sql_details['pass'],
                 array( PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION )
@@ -424,7 +455,10 @@ class SSP
         $out = array();
 
         for ( $i=0, $len=count($a) ; $i<$len ; $i++ ) {
-            $out[] = ($isJoin && isset($a[$i]['as'])) ? $a[$i][$prop]. ' AS '.$a[$i]['as'] : $a[$i][$prop];
+            if ($prop == 'db' && strpos($a[$i]['db'], '@') === 0)
+                $out[] = null;
+            else
+                $out[] = ($isJoin && isset($a[$i]['as'])) ? $a[$i][$prop]. ' AS '.$a[$i]['as'] : $a[$i][$prop];
         }
 
         return $out;

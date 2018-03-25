@@ -3,8 +3,8 @@ Datatables SSP class for server side scripting for PostgreSQL (uses ILIKE)
 
 ## Extra features
 
-* May have columns for actions which is not in the database (eg. `@actions`)
-  that can be used to display actions.  They should start with `@`.
+* May have columns for actions which are not in the database (eg. `@actions`)
+  that can be used to display actions.  The name should start with `@`.
 
 ## Sample code using Slim with [slim_plates](https://github.com/projek-xyz/slim-plates)
 

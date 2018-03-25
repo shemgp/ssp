@@ -5,12 +5,12 @@
     "description": "Datatables SSP class for PHP server side scripting for PostgreSQL",
     "authors": [
         {
-            "name": "Kidhoma Norman",
-            "email": "arksnorman@gmail.com"
-        },
-        {
             "name": "Shem Pasamba",
             "email": "shemgp@gmail.com"
+        },
+        {
+            "name": "Kidhoma Norman",
+            "email": "arksnorman@gmail.com"
         }
     ],
     "autoload": {

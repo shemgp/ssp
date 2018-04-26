@@ -170,7 +170,7 @@ class SSP
 
                 if ( $requestColumn['searchable'] == 'true' ) {
                     $binding = SSP::bind( $bindings, '%'.$str.'%', PDO::PARAM_STR );
-                    $globalSearch[] = ($isJoin) ? "to_char(\"".$column['db']."\"::text ILIKE ".$binding : "to_char(\"".$column['db']."\")::text ILIKE ".$binding;
+                    $globalSearch[] = ($isJoin) ? "coalesce(to_char(\"".$column['db']."\")::text,'') ILIKE ".$binding : "coalesce(to_char(\"".$column['db']."\")::text,'') ILIKE ".$binding;
                 }
             }
         }
